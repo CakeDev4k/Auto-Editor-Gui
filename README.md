@@ -1,4 +1,4 @@
-**Visão Geral**
+# Auto Editor Gui
 
 ![Preview da GUI](img/gui.png)
 
