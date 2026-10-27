@@ -27,6 +27,8 @@ reqwest = { version = "0.12", default-features = false, features = [
   "charset",
 ] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [profile.release]
 panic = "abort"

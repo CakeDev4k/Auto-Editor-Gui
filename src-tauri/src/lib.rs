@@ -905,6 +905,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        // Atualização do próprio app: lê o latest.json da última release no
+        // GitHub e só aceita instalador assinado com a chave do pubkey.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(EditorState::default())
         .invoke_handler(tauri::generate_handler![
             file_info,

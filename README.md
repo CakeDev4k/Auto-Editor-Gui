@@ -123,6 +123,59 @@ npm run tauri build
 
 Gera instaladores em `src-tauri/target/release/bundle/` (NSIS `.exe` e MSI).
 
+## Atualização automática do app
+
+O PrimeTrim procura versão nova sozinho alguns segundos depois de abrir (e pelo
+botão "Procurar atualização" em **Sobre**). Se houver, mostra as notas da
+release e oferece "Atualizar e reiniciar". Não deixa atualizar com um corte
+rodando, porque o instalador fecha o app.
+
+Como funciona: o plugin `tauri-plugin-updater` lê
+`https://github.com/CakeDev4k/Auto-Editor-Gui/releases/latest/download/latest.json`
+e só instala o pacote cuja assinatura bate com o `pubkey` em
+`src-tauri/tauri.conf.json`. Sem a chave privada, ninguém consegue empurrar uma
+atualização para quem já tem o app instalado — nem quem tiver acesso ao repositório.
+
+### Lançando uma versão
+
+O jeito fácil é o **`gerenciar-atualizacoes.bat`**, um menu que faz tudo abaixo:
+ver releases e builds, lançar versão (com confirmação antes do push), abrir o
+GitHub para publicar o rascunho, build local assinado para teste e cadastro da
+chave nos segredos do repositório. Ele usa o GitHub CLI (`gh`) logado.
+
+O passo a passo manual:
+
+1. Suba a versão em `package.json` (é a única fonte: a `tauri.conf.json` lê dali).
+2. Commit, depois `git tag v0.2.0` e `git push --tags`.
+3. A action `release` compila, baixa os sidecars nas versões fixadas no
+   workflow, assina e cria um **rascunho** de release com o instalador e o
+   `latest.json`.
+4. Confira o rascunho, escreva as notas e clique em **Publish release**. Só aí
+   os apps instalados enxergam a versão nova.
+
+A action precisa de dois segredos no repositório (Settings → Secrets and
+variables → Actions): `TAURI_SIGNING_PRIVATE_KEY`, com o conteúdo do arquivo da
+chave privada, e `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (vazio se a chave não tiver senha).
+
+**A chave privada nunca entra no repositório.** Se ela se perder, as versões já
+instaladas não aceitam mais nenhuma atualização — guarde uma cópia fora deste
+computador.
+
+### Para forks
+
+Um fork que publicar as próprias releases precisa gerar o próprio par de chaves
+e apontar o app para o próprio repositório. Senão, os builds do fork vão
+procurar atualização no repositório original e recusar as do fork:
+
+```bash
+npx tauri signer generate -w ~/.tauri/meu-fork.key
+```
+
+Depois troque `plugins.updater.pubkey` (conteúdo do `.key.pub`) e
+`plugins.updater.endpoints` em `src-tauri/tauri.conf.json`, e cadastre a chave
+privada nos segredos do fork. Para quem só compila localmente nada disso
+importa: o app funciona igual, só não acha atualização.
+
 ## Como funciona
 
 1. O frontend (Vite/TS) coleta os parâmetros de edição.

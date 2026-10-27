@@ -2339,3 +2339,65 @@ kbd {
   justify-content: flex-end;
   margin-top: 10px;
 }
+
+/* ---------- Atualização do app ---------- */
+
+.app-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+.app-update-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.update-versions {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+.update-versions strong {
+  color: var(--text);
+}
+.update-notes {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  user-select: text;
+}
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.update-progress .progress-fill {
+  width: 0%;
+}
+#update-error {
+  margin-top: 12px;
+}
+.update-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.update-busy-note {
+  font-size: 11.5px;
+  color: var(--warning);
+}

@@ -38,6 +38,8 @@ import {
 import { SUPPORTED_EXTS, VIDEO_EXTS } from "./media";
 import { runPreflight } from "./preflight";
 import { getIcon } from "./icons";
+import { findAppUpdate, installAppUpdate } from "./appUpdate";
+import type { Update } from "@tauri-apps/plugin-updater";
 import { createSelect } from "./select";
 import {
   type ToolId,
@@ -431,6 +433,37 @@ export async function mountUI(root: HTMLElement) {
       </div>
     </div>
 
+    <div class="modal-backdrop hidden" id="update-modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
+        <div class="modal-head">
+          <div class="modal-title" id="update-modal-title">
+            ${getIcon("download", 16)} Nova versão do PrimeTrim
+          </div>
+          <button class="icon-btn" id="update-close" type="button" title="Fechar">
+            ${getIcon("x", 15)}
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="update-versions" id="update-versions"></p>
+          <div class="update-notes" id="update-notes"></div>
+          <div class="update-progress hidden" id="update-progress">
+            <div class="progress-bar"><div class="progress-fill" id="update-progress-fill"></div></div>
+            <span id="update-progress-label">Baixando…</span>
+          </div>
+          <div class="banner error hidden" id="update-error"></div>
+        </div>
+        <div class="modal-foot">
+          <span class="update-busy-note hidden" id="update-busy-note">Termine o corte em andamento para atualizar.</span>
+          <div class="update-actions">
+            <button class="ghost" id="update-later" type="button">Depois</button>
+            <button class="primary" id="update-install" type="button">
+              ${getIcon("download", 14)} Atualizar e reiniciar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-backdrop hidden" id="about-modal">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="about-modal-title">
         <div class="modal-head">
@@ -446,6 +479,13 @@ export async function mountUI(root: HTMLElement) {
               <div class="about-hero-title">PRIME<em>TRIM</em></div>
               <div class="about-hero-sub">Threshold · versão ${__APP_VERSION__}</div>
             </div>
+          </div>
+
+          <div class="app-update-row">
+            <span class="app-update-status" id="app-update-status">Atualizações automáticas ativadas.</span>
+            <button class="ghost" id="app-update-check" type="button">
+              ${getIcon("refresh", 13)} Procurar atualização
+            </button>
           </div>
 
           <div class="credit">
@@ -578,6 +618,7 @@ export async function mountUI(root: HTMLElement) {
   const aboutBtn = $("about-btn") as HTMLButtonElement;
   const toolsModal = $("tools-modal");
   const aboutModal = $("about-modal");
+  const updateModal = $("update-modal");
   const toolsList = $("tools-list") as HTMLDivElement;
   const toolsMsg = $("tools-msg") as HTMLDivElement;
   const toolsCheckBtn = $("tools-check-btn") as HTMLButtonElement;
@@ -842,6 +883,7 @@ export async function mountUI(root: HTMLElement) {
     return (
       !toolsModal.classList.contains("hidden") ||
       !aboutModal.classList.contains("hidden") ||
+      !updateModal.classList.contains("hidden") ||
       !doneModal.classList.contains("hidden") ||
       !cutPrimeModal.classList.contains("hidden")
     );
@@ -850,14 +892,17 @@ export async function mountUI(root: HTMLElement) {
   function closeAllModals() {
     closeModal(toolsModal);
     closeModal(aboutModal);
+    if (!appUpdateInstalling) closeModal(updateModal);
     closeModal(doneModal);
     closeModal(cutPrimeModal);
   }
 
-  for (const backdrop of [toolsModal, aboutModal, doneModal, cutPrimeModal]) {
+  for (const backdrop of [toolsModal, aboutModal, doneModal, cutPrimeModal, updateModal]) {
     // Clique fora do painel fecha; clique dentro não deve vazar para o fundo.
     backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) closeModal(backdrop);
+      if (e.target === backdrop && !(backdrop === updateModal && appUpdateInstalling)) {
+        closeModal(backdrop);
+      }
     });
   }
 
@@ -971,6 +1016,106 @@ export async function mountUI(root: HTMLElement) {
     const target = lastOutputs[0];
     if (target) void openInExplorer(target).catch((e) => log(`${e}`, "error"));
   });
+
+  // ---- atualização do app ----
+
+  const updateVersions = $("update-versions");
+  const updateNotes = $("update-notes");
+  const updateProgress = $("update-progress");
+  const updateProgressFill = $("update-progress-fill");
+  const updateProgressLabel = $("update-progress-label");
+  const updateError = $("update-error");
+  const updateBusyNote = $("update-busy-note");
+  const updateInstallBtn = $("update-install") as HTMLButtonElement;
+  const updateLaterBtn = $("update-later") as HTMLButtonElement;
+  const appUpdateStatus = $("app-update-status");
+  const appUpdateCheckBtn = $("app-update-check") as HTMLButtonElement;
+
+  let pendingAppUpdate: Update | null = null;
+  let appUpdateInstalling = false;
+
+  function formatMB(bytes: number): string {
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function showAppUpdate(update: Update) {
+    pendingAppUpdate = update;
+    updateVersions.innerHTML = `Versão <strong>${update.version}</strong> disponível — você tem a ${update.currentVersion}.`;
+    // Notas vêm do corpo da release no GitHub: texto, nunca HTML.
+    updateNotes.textContent = update.body?.trim() || "Sem notas para esta versão.";
+    updateError.classList.add("hidden");
+    updateProgress.classList.add("hidden");
+    syncAppUpdateButtons();
+    openModal(updateModal);
+  }
+
+  /** Instalar fecha o app: não pode acontecer com um corte rodando. */
+  function syncAppUpdateButtons() {
+    updateInstallBtn.disabled = appUpdateInstalling || state.processing;
+    updateLaterBtn.disabled = appUpdateInstalling;
+    updateBusyNote.classList.toggle("hidden", !state.processing || appUpdateInstalling);
+  }
+
+  async function checkAppUpdate(silent: boolean) {
+    appUpdateCheckBtn.disabled = true;
+    appUpdateStatus.textContent = "Procurando…";
+    try {
+      const update = await findAppUpdate();
+      if (update) {
+        appUpdateStatus.textContent = `Versão ${update.version} disponível.`;
+        log(`Nova versão do PrimeTrim: ${update.version}`, "info");
+        if (silent && anyModalOpen()) return; // não empilha em cima de outro modal
+        if (!silent) closeModal(aboutModal);
+        showAppUpdate(update);
+      } else {
+        appUpdateStatus.textContent = "Você está na versão mais recente.";
+      }
+    } catch (e) {
+      // Sem rede, ou release sem latest.json: na checagem do início isso só
+      // vai para o log — o app funciona igual sem atualizar.
+      appUpdateStatus.textContent = "Não foi possível verificar agora.";
+      log(`Verificação de atualização do app falhou: ${e}`, silent ? "warning" : "error");
+    } finally {
+      appUpdateCheckBtn.disabled = false;
+    }
+  }
+
+  updateInstallBtn.addEventListener("click", async () => {
+    if (!pendingAppUpdate || state.processing) return;
+    appUpdateInstalling = true;
+    syncAppUpdateButtons();
+    updateError.classList.add("hidden");
+    updateProgress.classList.remove("hidden");
+    updateProgressFill.style.width = "0%";
+    updateProgressLabel.textContent = "Baixando…";
+    try {
+      await installAppUpdate(pendingAppUpdate, ({ downloaded, total }) => {
+        if (total) {
+          const pct = Math.min(100, Math.round((downloaded / total) * 100));
+          updateProgressFill.style.width = `${pct}%`;
+          updateProgressLabel.textContent =
+            pct >= 100
+              ? "Instalando — o app vai reiniciar…"
+              : `Baixando… ${formatMB(downloaded)} de ${formatMB(total)}`;
+        } else {
+          updateProgressLabel.textContent = `Baixando… ${formatMB(downloaded)}`;
+        }
+      });
+    } catch (e) {
+      appUpdateInstalling = false;
+      updateProgress.classList.add("hidden");
+      updateError.textContent = `Não deu para atualizar: ${e}`;
+      updateError.classList.remove("hidden");
+      log(`Atualização do app falhou: ${e}`, "error");
+      syncAppUpdateButtons();
+    }
+  });
+
+  updateLaterBtn.addEventListener("click", () => closeModal(updateModal));
+  ($("update-close") as HTMLButtonElement).addEventListener("click", () => {
+    if (!appUpdateInstalling) closeModal(updateModal);
+  });
+  appUpdateCheckBtn.addEventListener("click", () => void checkAppUpdate(false));
 
   // ---- anúncio do Cut Prime ----
 
@@ -3067,6 +3212,7 @@ export async function mountUI(root: HTMLElement) {
 
     state.processing = true;
     state.cancelled = false;
+    syncAppUpdateButtons();
     runBtn.disabled = true;
     cancelBtn.disabled = false;
     runBtn.innerHTML = `${getIcon("zap", 15, "animate-pulse")} Processando...`;
@@ -3185,6 +3331,7 @@ export async function mountUI(root: HTMLElement) {
 
   function finishRun() {
     state.processing = false;
+    syncAppUpdateButtons();
     runBtn.disabled = false;
     cancelBtn.disabled = true;
     runBtn.innerHTML = `${getIcon("play", 15)} Iniciar Edição`;
@@ -3232,6 +3379,8 @@ export async function mountUI(root: HTMLElement) {
   // Checagem silenciosa no início: falha de rede não deve virar erro na tela,
   // e o app funciona igual sem nunca atualizar nada.
   void doCheckUpdates(true);
+  // O app em si também: uns segundos depois, para não disputar a abertura.
+  window.setTimeout(() => void checkAppUpdate(true), 4000);
 
   renderQueue();
 }

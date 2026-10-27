@@ -1,0 +1,81 @@
+# Gera o instalador do PrimeTrim e o rascunho da release no GitHub.
+#
+# Dispara ao enviar uma tag `v*` (ex.: v0.2.0) ou à mão pela aba Actions. A
+# release sai como RASCUNHO: o auto-update só enxerga releases publicadas, então
+# nada chega aos usuários até alguém conferir e clicar em "Publish release".
+#
+# Segredos necessários (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           conteúdo de ~/.tauri/primetrim.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  senha da chave (vazio se não tiver)
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Versões dos sidecars embarcados. São as mesmas que o app usa como
+  # "versão embarcada" na tela de Dependências.
+  AUTO_EDITOR_VERSION: "31.5.0"
+  FFMPEG_VERSION: "9.0.1"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      # Os .exe dos sidecars não ficam no git (são ~340 MB). Baixa das fontes
+      # oficiais, com versão fixa, e nomeia no padrão de sidecar do Tauri.
+      - name: Baixar auto-editor e FFmpeg
+        shell: pwsh
+        run: |
+          $bin = "src-tauri/binaries"
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          $triple = "x86_64-pc-windows-msvc"
+
+          Invoke-WebRequest -Uri "https://github.com/WyattBlue/auto-editor/releases/download/$env:AUTO_EDITOR_VERSION/auto-editor-windows-x86_64.exe" -OutFile "$bin/auto_editor-$triple.exe"
+
+          $zip = "$env:RUNNER_TEMP/ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://github.com/GyanD/codexffmpeg/releases/download/$env:FFMPEG_VERSION/ffmpeg-$env:FFMPEG_VERSION-essentials_build.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP/ffmpeg"
+          $dir = Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Directory | Select-Object -First 1
+          foreach ($tool in "ffmpeg", "ffprobe", "ffplay") {
+            Copy-Item "$($dir.FullName)/bin/$tool.exe" "$bin/$tool-$triple.exe"
+          }
+
+          & "$bin/auto_editor-$triple.exe" --version
+          & "$bin/ffmpeg-$triple.exe" -version | Select-Object -First 1
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: PrimeTrim v__VERSION__
+          releaseBody: "Veja as mudanças abaixo. Quem já tem o PrimeTrim instalado recebe esta versão pelo próprio app depois que a release for publicada."
+          releaseDraft: true
+          prerelease: false
+          # Gera o latest.json que o app lê em
+          # releases/latest/download/latest.json
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
