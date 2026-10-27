@@ -33,3 +33,13 @@ ffmpeg.exe
 ffplay.exe
 ffprobe.exe
 auto_editor.exe
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/*.exe

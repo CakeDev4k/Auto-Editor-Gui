@@ -1,0 +1,36 @@
+[package]
+name = "primetrim"
+version = "0.1.0"
+description = "PrimeTrim — corte automático de silêncios (Threshold)"
+edition = "2021"
+
+[lib]
+name = "primetrim_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync"] }
+# Updater da toolchain (auto-editor + ffmpeg). rustls para não depender do
+# OpenSSL do sistema; sem gzip/brotli porque os downloads já são binários.
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "json",
+  "http2",
+  "charset",
+] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

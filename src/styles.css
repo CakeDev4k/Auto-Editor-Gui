@@ -1,0 +1,2341 @@
+/* ============================================================
+   PrimeTrim — painel Threshold
+
+   Mesma paleta do threshold.editor e do site: preto quase absoluto,
+   #dc2626 como única cor de ação, e todo o resto em branco com alfa.
+   Cor aqui é informação, não decoração — verde só diz "manteve",
+   vermelho só diz "cortou" ou "aja aqui".
+
+   Sem @import de fonte remota: o app roda offline, e uma fonte que
+   às vezes carrega e às vezes não é pior que uma que nunca carrega.
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #050505;
+  --surface: #0a0a0a;
+  --surface-raised: #101013;
+  --surface-sunken: rgba(0, 0, 0, 0.45);
+
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --panel-border-strong: rgba(255, 255, 255, 0.16);
+
+  --text: #ffffff;
+  --text-soft: rgba(255, 255, 255, 0.72);
+  --text-muted: rgba(255, 255, 255, 0.5);
+  --text-faint: rgba(255, 255, 255, 0.34);
+
+  --accent: #dc2626;
+  --accent-hover: #ef4444;
+  --accent-strong: #b91c1c;
+  --accent-soft: rgba(220, 38, 38, 0.12);
+  --accent-border: rgba(220, 38, 38, 0.35);
+  --accent-glow: 0 0 24px rgba(220, 38, 38, 0.25);
+
+  --success: #22c55e;
+  --success-soft: rgba(34, 197, 94, 0.12);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --error: #ef4444;
+  --error-soft: rgba(239, 68, 68, 0.12);
+  --info: #60a5fa;
+
+  /* Trilhas de corte: verde = sobrevive, vermelho = sai. */
+  --kept: #22c55e;
+  --cut: #dc2626;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.55);
+  --glow: 0 0 0 3px rgba(220, 38, 38, 0.22);
+
+  --t-fast: 0.14s ease;
+  --t-norm: 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+
+  --gap: 14px;
+  --pad: 16px;
+
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Brilho vermelho preso ao topo da janela, e não ao conteúdo: rolar uma
+   fila longa de arquivos não deve arrastar a luz junto. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 280px;
+  pointer-events: none;
+  background: radial-gradient(70% 100% at 50% 0%, rgba(220, 38, 38, 0.13), transparent 70%);
+  z-index: 0;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(220, 38, 38, 0.65), rgba(127, 29, 29, 0.65));
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- Casca ---------- */
+
+#app {
+  position: relative;
+  z-index: 1;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+}
+
+/* ---------- Barra do topo ---------- */
+
+/* A barra também é a moldura da janela (decorations: false): arrasta, e os
+   botões de minimizar/maximizar/fechar encostam no canto, na altura toda. */
+.app-bar {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  height: 52px;
+  padding: 0 0 0 14px;
+  border-bottom: 1px solid var(--panel-border);
+  background: rgba(5, 5, 5, 0.9);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  box-shadow: var(--accent-glow);
+}
+
+/* Anúncio do Cut Prime no lugar da marca do app. */
+.bar-promo {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 12px 0 5px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, rgba(220, 38, 38, 0.16), rgba(249, 115, 22, 0.06));
+  color: var(--text-soft);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+.bar-promo:hover {
+  border-color: var(--accent-hover);
+  background: linear-gradient(90deg, rgba(220, 38, 38, 0.26), rgba(249, 115, 22, 0.1));
+  color: var(--text);
+}
+.bar-promo strong {
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+.bar-promo-tag {
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, #dc2626, #f97316);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.bar-promo .lucide-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.app-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.win-controls {
+  display: flex;
+  align-self: stretch;
+  margin-left: 6px;
+  border-left: 1px solid var(--panel-border);
+}
+
+.win-ctl {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: default;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.win-ctl:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+.win-ctl.close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  transform: none;
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.icon-btn.has-update {
+  color: var(--accent-hover);
+}
+
+/* Ponto vermelho no sino de atualização: a única coisa na barra que
+   pede ação sem ter sido pedida. */
+.icon-btn.has-update::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin: -16px 0 0 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+/* ---------- Superfícies ---------- */
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: var(--pad);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  transition: border-color var(--t-norm);
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
+}
+
+.card-title .lucide-icon {
+  color: var(--accent-hover);
+}
+
+.card-subtitle {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.row > * {
+  flex: 1;
+}
+
+/* ---------- Campos ---------- */
+
+label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+input[type="text"],
+select,
+textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
+}
+
+input[type="text"]:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+input[type="text"].invalid {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 72px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ---------- Dropdown ---------- */
+
+.select {
+  position: relative;
+  width: 100%;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.select-trigger:hover:not(:disabled) {
+  border-color: var(--panel-border-strong);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.select.is-open .select-trigger {
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.select-value-icon,
+.select-option-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  color: var(--accent-hover);
+}
+
+/* Logo de marca: cantos arredondados como no ícone do próprio app, e nunca
+   recolorida — ao contrário dos ícones de traço, que herdam a cor do tema. */
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 3.5px;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Logos que não trazem o próprio quadrado (Kdenlive, Resolve) respiram dentro
+   do slot; os que já são ícone de app ocupam a caixa inteira. */
+.brand-logo--glyph {
+  border-radius: 0;
+  transform: scale(0.92);
+}
+
+.select-value-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.select-chevron {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform var(--t-norm);
+}
+
+.select.is-open .select-chevron {
+  transform: rotate(180deg);
+}
+
+.select-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  max-height: 300px;
+  padding: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.7);
+  animation: select-in 0.12s ease both;
+}
+
+.select.drops-up .select-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+@keyframes select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.select-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.select-option.is-active {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.select-option.is-selected {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.select-option .select-option-icon {
+  margin-top: 1px;
+  color: var(--text-faint);
+}
+
+.select-option.is-selected .select-option-icon,
+.select-option.is-active .select-option-icon {
+  color: var(--accent-hover);
+}
+
+.select-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.select-option-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A linha que diz o que a opção faz — o motivo de a lista ser desenhada à mão
+   em vez de um <select>, onde nada disso caberia. */
+.select-option-hint {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+.select-option-check {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--accent-hover);
+  opacity: 0;
+}
+
+.select-option.is-selected .select-option-check {
+  opacity: 1;
+}
+
+/* Campo que também é slider: arrastar de lado muda o número. O cursor é a
+   única pista de que dá, então ele não pode sumir durante o arrasto. */
+input[type="text"].drag-value {
+  cursor: ew-resize;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--accent-hover);
+}
+
+input[type="text"].drag-value:focus {
+  cursor: text;
+}
+
+input[type="text"].drag-value.dragging,
+body.dragging-value input[type="text"].drag-value {
+  cursor: ew-resize;
+  user-select: none;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.error-msg {
+  margin-top: 4px;
+  min-height: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--error);
+}
+
+/* ---------- Botões ---------- */
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all var(--t-fast);
+}
+
+button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: var(--panel-border-strong);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* `:focus-visible` e não `:focus`: o contorno vermelho é para quem navega
+   pelo teclado, não para quem acabou de clicar exatamente onde queria. */
+button:focus-visible,
+select:focus-visible,
+.audio-lane-label:focus-within {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 2px;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.28);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+  box-shadow: 0 6px 20px rgba(220, 38, 38, 0.42);
+  transform: translateY(-1px);
+}
+
+button.primary:active:not(:disabled) {
+  background: var(--accent-strong);
+  transform: translateY(0);
+}
+
+/* Destrutivo em contorno, não preenchido: com vermelho de marca, o botão
+   sólido vermelho já é o botão normal — perigo precisa de outra forma. */
+button.danger {
+  background: transparent;
+  border-color: var(--accent-border);
+  color: var(--accent-hover);
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.ghost {
+  padding: 6px 11px;
+  font-size: 11.5px;
+  background: transparent;
+  border-color: var(--panel-border);
+  color: var(--text-muted);
+}
+
+button.ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--panel-border-strong);
+  color: var(--text);
+}
+
+button.ghost.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: #ffb4b4;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.actions button {
+  padding: 12px 30px;
+  font-size: 14px;
+  border-radius: var(--radius);
+}
+
+kbd {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.help {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  cursor: help;
+}
+
+/* ---------- Dropzone ---------- */
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding: 28px;
+  border: 1.5px dashed var(--panel-border-strong);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--t-norm);
+}
+
+.dropzone:hover,
+.dropzone.dragover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.dropzone .dz-icon {
+  color: var(--text-faint);
+  transition: all var(--t-norm);
+}
+
+.dropzone:hover .dz-icon,
+.dropzone.dragover .dz-icon {
+  color: var(--accent-hover);
+  transform: translateY(-2px);
+}
+
+.dropzone .hint {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.dz-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropzone.compact {
+  flex-direction: row;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px;
+  font-size: 12px;
+}
+
+/* Com a fila montada, a dropzone vira uma faixa: o conteúdo do card passou a
+   ser a lista, e a área de soltar só precisa continuar existindo. */
+.dropzone.compact .hint {
+  display: none;
+}
+
+/* ---------- Fila de arquivos ---------- */
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 216px;
+  padding-right: 3px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* Passando de cinco arquivos a lista vira rolagem, e a borda de baixo esmaece
+   para não fingir que acabou ali. */
+.file-list.is-long {
+  max-height: 260px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 13px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+
+.file-row:hover {
+  border-color: var(--panel-border-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.file-row.selected {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.file-row.status-running {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: var(--warning-soft);
+}
+
+.file-row.status-done {
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.file-row.status-error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: var(--error-soft);
+}
+
+.file-row .f-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+}
+
+.file-row.selected .f-icon {
+  background: rgba(220, 38, 38, 0.16);
+  color: var(--accent-hover);
+}
+
+.file-row .f-icon .icon-video,
+.file-row .f-icon .icon-audio {
+  color: inherit;
+}
+
+.file-row .f-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-row .f-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.file-row .f-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+.file-row .f-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.file-row .f-remove:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+.file-row .f-remove:hover .lucide-icon {
+  color: var(--accent-hover);
+}
+
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-toolbar-spacer {
+  flex: 1;
+}
+
+/* Marca qual arquivo está no player — com a fila longa, "selecionado" precisa
+   dizer o que a seleção faz. */
+.f-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(220, 38, 38, 0.18);
+  color: #ffb4b4;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* Marcador de estado por item da fila. */
+.qs {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.qs.running {
+  background: var(--warning);
+  animation: pulse-badge 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.qs.done {
+  background: var(--success);
+}
+
+.qs.err {
+  background: var(--accent);
+}
+
+.qs .badge-icon {
+  stroke-width: 3;
+}
+
+/* ---------- Chips de status ---------- */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-badge.running {
+  color: var(--warning);
+  border-color: rgba(245, 158, 11, 0.28);
+  background: var(--warning-soft);
+}
+
+.status-badge.running .status-dot {
+  box-shadow: 0 0 8px var(--warning);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.status-badge.ok {
+  color: var(--success);
+  border-color: rgba(34, 197, 94, 0.28);
+  background: var(--success-soft);
+}
+
+.status-badge.ok .status-dot {
+  box-shadow: 0 0 8px var(--success);
+}
+
+.status-badge.err {
+  color: var(--accent-hover);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.status-badge.err .status-dot {
+  box-shadow: 0 0 8px var(--accent);
+}
+
+/* ---------- Faixas de aviso ---------- */
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid var(--panel-border);
+  border-left: 3px solid;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.banner.error {
+  border-left-color: var(--accent);
+  color: #ffb4b4;
+}
+
+.banner.warning {
+  border-left-color: var(--warning);
+  color: #fcd9a0;
+}
+
+.banner.info {
+  border-left-color: var(--info);
+  color: var(--text-soft);
+}
+
+.banner code {
+  display: block;
+  margin-top: 7px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* ---------- Preview ---------- */
+
+#preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.preview-stage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: #000;
+  box-shadow: var(--shadow-md);
+}
+
+#preview {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  border: 0;
+  background: #000;
+  cursor: pointer;
+}
+
+/* Uma linha só: play, barra, tempo e o toggle de prévia.
+   Antes eram duas fileiras dentro de um painel com moldura, ocupando quase 70px
+   de uma janela onde a imagem é o que importa. */
+.preview-controls {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(5, 5, 5, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: all var(--t-norm);
+}
+
+.preview-stage:hover .preview-controls,
+.preview-stage:focus-within .preview-controls,
+.preview-stage.loading .preview-controls {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.preview-controls.disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.preview-time {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.preview-scrub {
+  --fill: 0%;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: var(--radius-full);
+  outline: none;
+  cursor: pointer;
+  background: linear-gradient(
+    90deg,
+    var(--accent) var(--fill),
+    rgba(255, 255, 255, 0.14) var(--fill)
+  );
+  transition: height var(--t-fast);
+}
+
+.preview-scrub:hover:not(:disabled) {
+  height: 6px;
+}
+
+.preview-scrub:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.preview-scrub::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border: 2.5px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  transition: transform var(--t-fast);
+}
+
+.preview-scrub:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.preview-btn-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(220, 38, 38, 0.4);
+  transition: all var(--t-fast);
+}
+
+.preview-btn-play:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: scale(1.1);
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.55);
+}
+
+.preview-btn-play:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.preview-btn-play .lucide-icon {
+  margin-left: 1px;
+}
+
+/* Prévia do corte: um interruptor, não um segundo play. Fica desligado como
+   contorno discreto e acende quando está pulando os cortes. */
+.preview-btn-skip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  transition: all var(--t-fast);
+}
+
+.preview-btn-skip:hover:not(:disabled) {
+  border-color: var(--panel-border-strong);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.preview-btn-skip.active {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(220, 38, 38, 0.45);
+}
+
+.preview-btn-skip.active:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* Contorno vermelho no palco enquanto a prévia pula cortes: sem ele, o vídeo
+   saltando parece defeito em vez de recurso ligado. */
+.preview-stage.skipping-cuts {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-md), inset 0 0 0 1px rgba(220, 38, 38, 0.25);
+}
+
+.preview-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 5, 5, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  transition: opacity var(--t-fast);
+}
+
+.preview-loading span {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(10, 10, 10, 0.95);
+  font-size: 11.5px;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+}
+
+.preview-loading span::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 750ms linear infinite;
+}
+
+/* As camadas de áudio não têm nada a mostrar: existem para tocar. */
+#audio-layer-host {
+  display: none;
+}
+
+/* Aviso discreto de que as faixas ainda estão sendo preparadas. Discreto de
+   propósito: o vídeo já toca enquanto isso, então isto informa, não bloqueia. */
+.audio-prep-chip {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-full);
+  background: rgba(5, 5, 5, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.audio-prep-chip::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 750ms linear infinite;
+}
+
+.preview-stage.audio-only .audio-prep-chip {
+  top: 8px;
+}
+
+.preview-stage:fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+}
+
+.preview-stage:fullscreen #preview {
+  width: 100vw;
+  max-height: 100vh;
+}
+
+/* Só áudio: sem imagem para mostrar, o palco vira uma faixa de informação. */
+#preview.audio-only {
+  height: 82px;
+  background: var(--surface-raised);
+}
+
+.preview-stage.audio-only {
+  min-height: 84px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-color: var(--panel-border);
+  background: var(--surface-raised);
+}
+
+.preview-stage.audio-only #preview {
+  display: none !important;
+}
+
+.preview-stage.audio-only .preview-controls {
+  position: relative;
+  inset: auto;
+  padding: 2px 14px 10px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+.preview-audio-dashboard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 4px;
+}
+
+.audio-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.audio-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.audio-size-dur {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* ---------- Timeline de cortes ---------- */
+
+.cuts-summary {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cuts-summary:empty {
+  display: none;
+}
+
+.cuts-summary .dim {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* Sem botão de re-analisar no modo simples, o aviso de "esses números são de
+   antes" tem que morar no próprio resumo. */
+.cuts-summary.stale {
+  color: var(--warning);
+}
+
+.cuts-summary.working::after {
+  content: "atualizando…";
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* ---------- Modo avançado ---------- */
+
+.expression-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.expression-note {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.expression-actions button {
+  flex-shrink: 0;
+}
+
+#cuts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition: opacity var(--t-fast);
+}
+
+#cuts-section.loading {
+  opacity: 0.5;
+}
+
+.cuts-track-wrap {
+  position: relative;
+  height: 66px;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.45);
+  cursor: grab;
+  user-select: none;
+  transition: border-color var(--t-fast);
+}
+
+.cuts-track-wrap:hover {
+  border-color: var(--panel-border-strong);
+}
+
+.cuts-track-wrap:active {
+  cursor: grabbing;
+}
+
+/* Os trechos mantidos e cortados são pintados no próprio canvas, junto com a
+   onda. Eram centenas de divs posicionados — um por segmento — e num arquivo
+   com 435 cortes isso era DOM demais para desenhar um pente de 1px. */
+.cuts-waveform {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Etiqueta que segue o cursor: tempo e o que acontece ali. */
+.cuts-hover {
+  position: absolute;
+  top: 7px;
+  z-index: 5;
+  padding: 3px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-full);
+  background: rgba(5, 5, 5, 0.92);
+  color: var(--success);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.cuts-hover.is-cut {
+  color: var(--accent-hover);
+  border-color: var(--accent-border);
+}
+
+.cuts-playhead {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  z-index: 3;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 6px #fff, 0 0 14px var(--accent);
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+
+.cuts-minimap {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.cuts-waveform.mini {
+  z-index: 2;
+}
+
+.cuts-viewport {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  min-width: 6px;
+  border: 1.5px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(220, 38, 38, 0.16);
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.45);
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.cuts-viewport:active {
+  cursor: grabbing;
+  background: rgba(220, 38, 38, 0.28);
+}
+
+.cuts-axis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+#cuts-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font);
+  font-weight: 600;
+}
+
+.lg-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.lg-dot.kept {
+  background: var(--kept);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.lg-dot.cut {
+  background: var(--cut);
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.5);
+}
+
+.zoom-info {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-hover);
+}
+
+/* ---------- Faixas de áudio ---------- */
+
+.audio-lane-label input,
+.checkbox input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.audio-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.audio-lane {
+  position: relative;
+  height: 38px;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.audio-lane.muted {
+  opacity: 0.4;
+}
+
+.audio-lane-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 96px;
+  margin: 0;
+  padding: 0 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border-right: 1px solid var(--panel-border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audio-lane-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audio-lane-wave-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.audio-lane-wave {
+  inset: 0;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--t-fast);
+}
+
+.checkbox:hover {
+  color: var(--text);
+}
+
+/* ---------- Interruptor ---------- */
+
+.advanced-toggle-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.switch input {
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  transition: var(--t-norm);
+}
+
+.switch-slider::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: var(--t-norm);
+}
+
+.switch input:checked + .switch-slider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch input:checked + .switch-slider::before {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+/* ---------- Progresso ---------- */
+
+.progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.progress-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent-hover));
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.45);
+  transition: width 200ms ease;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+/* ---------- Console ---------- */
+
+.log {
+  height: 220px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.5);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.log-line.info {
+  color: var(--text-soft);
+}
+
+.log-line.success {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.log-line.warning {
+  color: var(--warning);
+}
+
+.log-line.error {
+  color: var(--accent-hover);
+  font-weight: 700;
+}
+
+.log-line.command {
+  color: #ffb4b4;
+  font-weight: 600;
+}
+
+/* ---------- Modais ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: fade-in var(--t-fast) both;
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 520px;
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), var(--accent-glow);
+  animation: modal-in var(--t-norm) both;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.modal-title .lucide-icon {
+  color: var(--accent-hover);
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.modal-note {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+/* ---------- Painel de dependências ---------- */
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.tool-row.has-update {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.tool-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tool-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tool-version {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.tool-version .to {
+  color: var(--accent-hover);
+  font-weight: 700;
+}
+
+.tool-error {
+  font-size: 11.5px;
+  color: var(--accent-hover);
+}
+
+.tool-tag {
+  padding: 2px 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.tool-tag.managed {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.tool-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.tool-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* ---------- Créditos ---------- */
+
+.credit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px 14px;
+  border: 1px solid var(--panel-border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.credit-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.credit-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-soft);
+}
+
+.credit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-hover);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.credit-link:hover {
+  background: none;
+  border: none;
+  color: #fff;
+  text-decoration: underline;
+}
+
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding-bottom: 4px;
+}
+
+.about-hero .brand-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+}
+
+.about-hero-title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+}
+
+.about-hero-title em {
+  font-style: normal;
+  color: var(--accent-hover);
+}
+
+.about-hero-sub {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+/* ---------- Animações ---------- */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-badge {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes pulse-icon {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-pulse {
+  animation: pulse-icon 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Janela estreita ---------- */
+
+@media (max-width: 620px) {
+  .row {
+    flex-direction: column;
+  }
+
+
+  .tool-row {
+    flex-wrap: wrap;
+  }
+}
+
+
+/* ---------- Log recolhível ---------- */
+
+.log-card {
+  flex: 1;
+  min-height: 280px;
+}
+
+/* Recolhido o card para de esticar: o espaço volta para a fila e o preview,
+   que é o que a pessoa está olhando quando não quer ver o log. */
+.log-card.is-collapsed {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.log-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.log-toggle:hover:not(:disabled) {
+  background: none;
+  border: none;
+  color: var(--text);
+}
+
+.log-toggle .log-chevron {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-faint);
+  transition: transform var(--t-norm);
+}
+
+.log-card.is-collapsed .log-chevron {
+  transform: rotate(-90deg);
+}
+
+.log-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.log-card.is-collapsed .log-body {
+  display: none;
+}
+
+.log-card.is-collapsed .log {
+  height: 0;
+}
+
+/* ---------- Aviso de conclusão ---------- */
+
+.done-check {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.modal-title .done-check .lucide-icon {
+  color: var(--success);
+}
+
+.done-summary {
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.done-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.done-file {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  text-align: left;
+}
+
+.done-file:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.done-file-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* O diretório é o dado que faltava: "_ALTERED" ao lado do original é fácil de
+   não achar quando se acabou de processar uma fila inteira. */
+.done-file-dir {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
+.done-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- Popup do Cut Prime ---------- */
+
+.cutprime-pop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  padding: 22px 22px 18px;
+  border-color: var(--accent-border);
+  background:
+    radial-gradient(120% 120% at 100% 0%, rgba(249, 115, 22, 0.14), transparent 55%),
+    linear-gradient(160deg, rgba(220, 38, 38, 0.16), var(--surface) 60%);
+}
+.cutprime-x {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.cutprime-tag {
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, #dc2626, #f97316);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+.cutprime-title {
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  color: var(--text);
+}
+.cutprime-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-soft);
+}
+.cutprime-actions {
+  display: flex;
+  gap: 8px;
+  align-self: stretch;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
