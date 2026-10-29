@@ -1,6 +1,6 @@
 [package]
 name = "primetrim"
-version = "0.1.0"
+version = "0.1.1"
 description = "PrimeTrim — corte automático de silêncios (Threshold)"
 edition = "2021"
 
