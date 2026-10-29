@@ -1,4 +1,4 @@
-# Gera o instalador do PrimeTrim e o rascunho da release no GitHub.
+# Gera os instaladores do PrimeTrim (Windows e Mac) e o rascunho da release.
 #
 # Dispara ao enviar uma tag `v*` (ex.: v0.2.0) ou à mão pela aba Actions. A
 # release sai como RASCUNHO: o auto-update só enxerga releases publicadas, então
@@ -13,19 +13,45 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      so_build:
+        description: "So compilar e guardar os arquivos na execucao (nao mexe em release)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
 
 env:
-  # Versões dos sidecars embarcados. São as mesmas que o app usa como
-  # "versão embarcada" na tela de Dependências.
+  # Versoes dos sidecars embarcados. Sao as mesmas que o app usa como
+  # "versao embarcada" na tela de Dependencias.
   AUTO_EDITOR_VERSION: "31.5.0"
   FFMPEG_VERSION: "9.0.1"
+  # O gyan.dev so tem Windows. No Mac o FFmpeg vem dos builds estaticos de
+  # Martin Riedl, por pasta versionada: o link "latest" dele aponta para builds
+  # em andamento e respondeu 404 para o ffmpeg em 29/10/2026.
+  FFMPEG_MAC_VERSION: "9.0.2"
+  FFMPEG_MAC_ARM64_DIR: "1789931890_9.0.2"
+  FFMPEG_MAC_AMD64_DIR: "1789931006_9.0.2"
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+          # Mac com chip Apple (M1 em diante)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          # Mac Intel, compilado na mesma maquina ARM
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,21 +61,26 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
 
       - run: npm ci
 
-      # Os .exe dos sidecars não ficam no git (são ~340 MB). Baixa das fontes
-      # oficiais, com versão fixa, e nomeia no padrão de sidecar do Tauri.
-      - name: Baixar auto-editor e FFmpeg
+      # Os sidecars nao ficam no git (sao ~340 MB). Baixa das fontes oficiais,
+      # com versao fixa, e nomeia no padrao de sidecar do Tauri
+      # (`nome-<target triple>`).
+      - name: Baixar auto-editor e FFmpeg (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $bin = "src-tauri/binaries"
           New-Item -ItemType Directory -Force $bin | Out-Null
-          $triple = "x86_64-pc-windows-msvc"
+          $triple = "${{ matrix.target }}"
 
           Invoke-WebRequest -Uri "https://github.com/WyattBlue/auto-editor/releases/download/$env:AUTO_EDITOR_VERSION/auto-editor-windows-x86_64.exe" -OutFile "$bin/auto_editor-$triple.exe"
 
@@ -64,7 +95,44 @@ jobs:
           & "$bin/auto_editor-$triple.exe" --version
           & "$bin/ffmpeg-$triple.exe" -version | Select-Object -First 1
 
+      - name: Baixar auto-editor e FFmpeg (Mac)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=src-tauri/binaries
+          mkdir -p "$bin"
+          triple="${{ matrix.target }}"
+          if [ "$triple" = "aarch64-apple-darwin" ]; then
+            ae=arm64; ff=arm64; ffdir="$FFMPEG_MAC_ARM64_DIR"
+          else
+            ae=x86_64; ff=amd64; ffdir="$FFMPEG_MAC_AMD64_DIR"
+          fi
+
+          curl -fsSL -o "$bin/auto_editor-$triple"             "https://github.com/WyattBlue/auto-editor/releases/download/$AUTO_EDITOR_VERSION/auto-editor-macos-$ae"
+
+          for tool in ffmpeg ffprobe ffplay; do
+            curl -fsSL -o "$RUNNER_TEMP/$tool.zip"               "https://ffmpeg.martin-riedl.de/download/macos/$ff/$ffdir/$tool.zip"
+            unzip -o -q "$RUNNER_TEMP/$tool.zip" -d "$RUNNER_TEMP/$tool"
+            cp "$(find "$RUNNER_TEMP/$tool" -type f -name "$tool" | head -1)" "$bin/$tool-$triple"
+          done
+          chmod +x "$bin"/*-"$triple"
+          # Tira a quarentena e a assinatura de origem: o Tauri assina tudo de
+          # novo (ad-hoc) dentro do .app, e uma assinatura anterior quebrada
+          # faria o Mac recusar o sidecar.
+          xattr -cr "$bin" || true
+
+          # So da para rodar o binario da mesma arquitetura da maquina.
+          if [ "$(uname -m)" = "arm64" ] && [ "$ae" = "arm64" ]; then
+            "$bin/auto_editor-$triple" --version
+            "$bin/ffmpeg-$triple" -version | head -1
+          fi
+          file "$bin"/*-"$triple"
+
+      # Release: um rascunho por versao; os tres jobs sobem no mesmo rascunho
+      # e o tauri-action junta as plataformas no mesmo latest.json.
       - uses: tauri-apps/tauri-action@v0
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.so_build) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -75,7 +143,31 @@ jobs:
           releaseBody: "Veja as mudanças abaixo. Quem já tem o PrimeTrim instalado recebe esta versão pelo próprio app depois que a release for publicada."
           releaseDraft: true
           prerelease: false
-          # Gera o latest.json que o app lê em
+          args: ${{ matrix.args }}
+          # Gera o latest.json que o app le em
           # releases/latest/download/latest.json
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      # So build: compila igual, sem tocar em release, e guarda os instaladores
+      # na propria execucao para baixar e testar. Sem os arquivos de
+      # atualizacao, que exigem a chave de assinatura: o teste de "compila e
+      # abre" nao deve depender do segredo estar cadastrado.
+      - name: Config do teste (sem artefatos de atualizacao)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.so_build }}
+        shell: bash
+        run: echo '{"bundle":{"createUpdaterArtifacts":false}}' > tauri.teste.conf.json
+
+      - uses: tauri-apps/tauri-action@v0
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.so_build }}
+        with:
+          args: ${{ matrix.args }} --config tauri.teste.conf.json
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.so_build }}
+        with:
+          name: primetrim-${{ matrix.target }}
+          path: |
+            src-tauri/target/**/release/bundle/nsis/*.exe
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+          if-no-files-found: error

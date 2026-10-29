@@ -295,8 +295,12 @@ fn auto_editor_asset_name() -> String {
     } else {
         "linux"
     };
-    let arch = match std::env::consts::ARCH {
-        "aarch64" => "aarch64",
+    // O auto-editor chama o ARM de `aarch64` no Windows e no Linux, mas de
+    // `arm64` no Mac (`auto-editor-macos-arm64`). Errar aqui so aparece no
+    // Mac com chip Apple, como "a release nao tem o arquivo".
+    let arch = match (os, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "arm64",
+        (_, "aarch64") => "aarch64",
         _ => "x86_64",
     };
     let suffix = if cfg!(windows) { ".exe" } else { "" };
@@ -378,6 +382,20 @@ pub async fn check_tool_updates(app: AppHandle) -> Result<Vec<ToolUpdate>, Strin
 
     let ff_status = status_of(&app, "ffmpeg").await;
     let (ff_display, ff_comparable) = effective_current(&ff_status);
+    if !ffmpeg_updatable() {
+        out.push(ToolUpdate {
+            id: "ffmpeg".into(),
+            label: tool_label("ffmpeg").into(),
+            latest: ff_display.clone(),
+            current: ff_display,
+            update_available: false,
+            comparable: ff_comparable.is_some(),
+            notes: FFMPEG_BUNDLED_ONLY.into(),
+            release_url: FFMPEG_HOME.into(),
+            published_at: String::new(),
+        });
+        return Ok(out);
+    }
     let latest = latest_ffmpeg().await?;
     let update_available = match &ff_comparable {
         Some(cur) => is_newer(&latest, cur),
@@ -506,6 +524,20 @@ async fn verify_binary(app: &AppHandle, path: &Path, id: &str) -> Result<String,
         .to_string())
 }
 
+/// No Mac e no Linux, arquivo baixado nasce sem permissao de execucao, e o
+/// `--version` da verificacao falharia com "permission denied".
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        .map_err(|e| format!("nao consegui tornar {} executavel: {e}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 fn unique_temp(prefix: &str, ext: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -531,6 +563,7 @@ async fn install_auto_editor(app: &AppHandle) -> Result<String, String> {
     emit_progress(app, "auto_editor", "download", 0.0, "iniciando");
     download_to(app, "auto_editor", &asset.browser_download_url, &staged).await?;
 
+    make_executable(&staged)?;
     emit_progress(app, "auto_editor", "verify", 100.0, "verificando");
     if let Err(e) = verify_binary(app, &staged, "auto_editor").await {
         let _ = fs::remove_file(&staged);
@@ -584,7 +617,20 @@ fn extract_ffmpeg_zip(app: &AppHandle, zip_path: &Path, dir: &Path) -> Result<Ve
     Ok(staged)
 }
 
+/// O gyan.dev so tem builds de Windows. No Mac o FFmpeg vem dentro do app
+/// (versao fixa no `release.yml`) e atualiza junto com ele: a fonte de Mac
+/// usada na build nao tem um link estavel de "ultima versao" para o app seguir.
+fn ffmpeg_updatable() -> bool {
+    cfg!(target_os = "windows")
+}
+
+const FFMPEG_BUNDLED_ONLY: &str =
+    "Neste sistema o FFmpeg vem junto com o PrimeTrim e atualiza quando o app atualiza.";
+
 async fn install_ffmpeg(app: &AppHandle) -> Result<String, String> {
+    if !ffmpeg_updatable() {
+        return Err(FFMPEG_BUNDLED_ONLY.into());
+    }
     let version = latest_ffmpeg().await?;
     let dir = ensure_managed_dir(app)?;
     let zip_path = unique_temp("ffmpeg", "zip");

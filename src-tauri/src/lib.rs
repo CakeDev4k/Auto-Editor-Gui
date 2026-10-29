@@ -216,12 +216,32 @@ fn open_in_explorer(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        let _ = target;
-        return Err("plataforma não suportada".into());
+        std::process::Command::new("open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Poe a pasta do app na frente do PATH, para o auto-editor achar o ffmpeg
+/// embarcado. O separador muda por sistema (`;` no Windows, `:` no Mac): com
+/// `;` fixo, o Mac leria um caminho so, inexistente, e perderia o PATH inteiro.
+fn path_with_exe_dir(exe_dir: &std::path::Path, existing: &str) -> String {
+    let mut dirs = vec![exe_dir.to_path_buf()];
+    dirs.extend(std::env::split_paths(existing));
+    std::env::join_paths(dirs)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| existing.to_string())
 }
 
 fn now_ts() -> String {
@@ -285,7 +305,7 @@ async fn run_editor(
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_default();
-    let new_path = format!("{};{}", exe_dir.display(), existing_path);
+    let new_path = path_with_exe_dir(&exe_dir, &existing_path);
     cmd = cmd.env("PATH", new_path);
 
     // Abre log persistente para esta execução
@@ -790,7 +810,7 @@ async fn preview_cuts(
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_default();
-    let new_path = format!("{};{}", exe_dir.display(), existing_path);
+    let new_path = path_with_exe_dir(&exe_dir, &existing_path);
     cmd = cmd.env("PATH", new_path);
 
     let out = cmd.output().await.map_err(|e| e.to_string())?;

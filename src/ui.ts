@@ -518,7 +518,7 @@ export async function mountUI(root: HTMLElement) {
             </div>
             <div class="credit-body">
               Leitura de metadados, extração de waveform e mixagem das faixas de áudio
-              do preview. Builds "essentials" para Windows por gyan.dev.
+              do preview. Builds "essentials" para Windows por gyan.dev; no Mac, builds de Martin Riedl.
             </div>
             <button class="credit-link" data-url="${FFMPEG_SITE_URL}" type="button">
               ${getIcon("external", 12)} ffmpeg.org
